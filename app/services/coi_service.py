@@ -10,12 +10,11 @@ Responsibilities:
   - Response-model construction with safe builders
 """
 
-from __future__ import annotations
 
 import logging
 import uuid
 from datetime import date
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 from app.core.config import settings
 from app.core.exceptions import COIExtractionError
@@ -38,7 +37,7 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-COI_KEYWORDS: List[str] = [
+COI_KEYWORDS: list[str] = [
     "CERTIFICATE OF LIABILITY INSURANCE",
     "CERTIFICATE OF INSURANCE",
     "ACORD 25",
@@ -56,7 +55,6 @@ COI_KEYWORDS: List[str] = [
 
 COI_KEYWORD_THRESHOLD: int = 3
 
-
 # ---------------------------------------------------------------------------
 # Classification helpers
 # ---------------------------------------------------------------------------
@@ -69,8 +67,7 @@ def looks_like_coi(raw_text: str) -> bool:
     hits = sum(1 for kw in COI_KEYWORDS if kw in upper)
     return hits >= COI_KEYWORD_THRESHOLD
 
-
-def extraction_is_incomplete(parsed: Dict[str, Any]) -> bool:
+def extraction_is_incomplete(parsed: dict[str, Any]) -> bool:
     """Return True when the pdfplumber result is missing important fields."""
     if not parsed.get("policies"):
         return True
@@ -82,18 +79,17 @@ def extraction_is_incomplete(parsed: Dict[str, Any]) -> bool:
         return True
     return False
 
-
 # ---------------------------------------------------------------------------
 # Expiration checking (A2 — moved from schemas/coi_verification.py)
 # ---------------------------------------------------------------------------
 
 def check_expired_policies(
-    policies: List[COIPolicy],
-    reference_date: Optional[date] = None,
-) -> List[COIPolicyExpiration]:
+    policies: list[COIPolicy],
+    reference_date: date | None = None,
+) -> list[COIPolicyExpiration]:
     """Return a list of expired policy details compared to *reference_date* (default: today)."""
     ref = reference_date or date.today()
-    expired: List[COIPolicyExpiration] = []
+    expired: list[COIPolicyExpiration] = []
 
     for policy in policies:
         try:
@@ -115,19 +111,17 @@ def check_expired_policies(
 
     return expired
 
-
 # ---------------------------------------------------------------------------
 # Safe model builders (never raise — return fallback on bad data)
 # ---------------------------------------------------------------------------
 
-def _safe_producer(data: Any) -> Optional[COIProducer]:
+def _safe_producer(data: Any) -> COIProducer | None:
     if not data or not isinstance(data, dict):
         return None
     try:
         return COIProducer(**data)
     except Exception:
         return None
-
 
 def _safe_insured(data: Any) -> COIInsured:
     if not data or not isinstance(data, dict):
@@ -137,8 +131,7 @@ def _safe_insured(data: Any) -> COIInsured:
     except Exception:
         return COIInsured(name="Unknown")
 
-
-def _safe_certificate_holder(data: Any) -> Optional[COICertificateHolder]:
+def _safe_certificate_holder(data: Any) -> COICertificateHolder | None:
     if not data or not isinstance(data, dict):
         return None
     try:
@@ -146,11 +139,10 @@ def _safe_certificate_holder(data: Any) -> Optional[COICertificateHolder]:
     except Exception:
         return None
 
-
-def _safe_insurers(data: Any) -> Optional[List[COIInsurer]]:
+def _safe_insurers(data: Any) -> list[COIInsurer] | None:
     if not data or not isinstance(data, list):
         return None
-    result: List[COIInsurer] = []
+    result: list[COIInsurer] = []
     for item in data:
         if not isinstance(item, dict):
             continue
@@ -160,11 +152,10 @@ def _safe_insurers(data: Any) -> Optional[List[COIInsurer]]:
             continue
     return result if result else None
 
-
-def _safe_policies(data: Any) -> List[COIPolicy]:
+def _safe_policies(data: Any) -> list[COIPolicy]:
     if not data or not isinstance(data, list):
         return []
-    result: List[COIPolicy] = []
+    result: list[COIPolicy] = []
     for item in data:
         if not isinstance(item, dict):
             continue
@@ -173,7 +164,6 @@ def _safe_policies(data: Any) -> List[COIPolicy]:
         except Exception:
             continue
     return result
-
 
 # ---------------------------------------------------------------------------
 # Response builders
@@ -194,7 +184,6 @@ def invalid_document_response(
         policies=[],
     )
 
-
 def invalid_document_ai_response(
     message: str = (
         "The uploaded document does not appear to be a valid ACORD 25 "
@@ -212,14 +201,13 @@ def invalid_document_ai_response(
         policies=[],
     )
 
-
 def build_verification_response(
-    parsed: Dict[str, Any],
+    parsed: dict[str, Any],
     *,
-    confidence: Optional[float] = None,
-    field_confidence: Optional[Dict[str, Any]] = None,
-    corrections: Optional[List[str]] = None,
-) -> Union[COIVerificationResponse, AIExtractionResponse]:
+    confidence: float | None = None,
+    field_confidence: dict[str, Any] | None = None,
+    corrections: list[str] | None = None,
+) -> COIVerificationResponse | AIExtractionResponse:
     """Build the appropriate response model from a parsed dict.
 
     When *confidence* is supplied an ``AIExtractionResponse`` is returned;
@@ -244,7 +232,7 @@ def build_verification_response(
         status = "verified"
         message = "All policies are active and verified."
 
-    common: Dict[str, Any] = dict(
+    common: dict[str, Any] = dict(
         id=str(uuid.uuid4()),
         is_valid_coi=True,
         certificate_number=None,
@@ -268,12 +256,11 @@ def build_verification_response(
         )
     return COIVerificationResponse(**common)
 
-
 # ---------------------------------------------------------------------------
 # Internal: pdfplumber extraction with fallback
 # ---------------------------------------------------------------------------
 
-def _empty_parsed() -> Dict[str, Any]:
+def _empty_parsed() -> dict[str, Any]:
     """Return a fresh empty-parsed dict (safe to mutate)."""
     return {
         "producer": None,
@@ -284,7 +271,6 @@ def _empty_parsed() -> Dict[str, Any]:
         "policies": [],
     }
 
-
 def _extract_text(contents: bytes) -> str:
     """Extract raw text from PDF bytes, returning empty string on failure."""
     try:
@@ -292,15 +278,13 @@ def _extract_text(contents: bytes) -> str:
     except Exception:
         return ""
 
-
-def _parse_pdf(contents: bytes) -> Dict[str, Any]:
+def _parse_pdf(contents: bytes) -> dict[str, Any]:
     """Run pdfplumber and return parsed dict, with safe fallback."""
     try:
         return parse_acord25_pdf(contents)
     except Exception as exc:
         logger.warning("pdfplumber parse failed: %s", exc)
         return _empty_parsed()
-
 
 # ---------------------------------------------------------------------------
 # Core orchestration — public API
@@ -310,7 +294,6 @@ _DEFAULT_NOT_COI_MSG = (
     "The uploaded document does not appear to be a valid ACORD 25 "
     "Certificate of Insurance. Please upload a valid COI document."
 )
-
 
 async def verify_coi(
     contents: bytes, *, use_ai: bool = False,
@@ -390,7 +373,6 @@ async def verify_coi(
 
     return build_verification_response(parsed)
 
-
 async def ai_extract_from_text(raw_text: str) -> AIExtractionResponse:
     """AI-only extraction from raw COI text.
 
@@ -416,7 +398,6 @@ async def ai_extract_from_text(raw_text: str) -> AIExtractionResponse:
         field_confidence=ai_result.get("field_confidence", {}),
         corrections=ai_result.get("corrections", []),
     )
-
 
 async def ai_enhance_from_pdf(contents: bytes) -> AIExtractionResponse:
     """Parse PDF with pdfplumber, then always run AI enhancement.

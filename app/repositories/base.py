@@ -1,7 +1,6 @@
 """Generic async repository with soft-delete, pagination, and tenant isolation."""
 
-from __future__ import annotations
-
+from datetime import datetime, timezone
 from typing import Any, Generic, TypeVar
 
 from sqlalchemy import func, select, update
@@ -89,8 +88,6 @@ class BaseRepository(Generic[ModelT]):
         return instance
 
     async def update(self, entity_id: str, **kwargs: Any) -> ModelT | None:
-        from datetime import datetime, timezone
-
         kwargs.pop("id", None)
         kwargs.pop("client_id", None)
         if "updated_at" not in kwargs and hasattr(self.model, "updated_at"):
@@ -106,8 +103,6 @@ class BaseRepository(Generic[ModelT]):
         return await self.get_by_id(entity_id)
 
     async def soft_delete(self, entity_id: str) -> bool:
-        from datetime import datetime, timezone
-
         result = await self._session.execute(
             update(self.model)
             .where(self.model.id == entity_id)

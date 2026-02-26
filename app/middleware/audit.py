@@ -1,16 +1,14 @@
 """Audit logging middleware — records every state-changing request to audit_trail."""
 
-from __future__ import annotations
 
 import time
-from typing import Callable
+from collections.abc import Callable
 
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
 # Methods that mutate state
 _WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
-
 
 class AuditMiddleware(BaseHTTPMiddleware):
     """Logs all write operations.

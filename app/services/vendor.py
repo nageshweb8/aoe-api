@@ -10,9 +10,6 @@ How to add a new service:
 Rule: No SQLAlchemy / no FastAPI here. Pure Python business logic.
 """
 
-from __future__ import annotations
-
-from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,12 +19,11 @@ from app.domain.vendor import Vendor
 from app.repositories.vendor import VendorRepository
 from app.schemas.vendor import VendorCreate, VendorUpdate
 
-
 class VendorService:
     def __init__(self, session: AsyncSession, client_id: str):
         self._repo = VendorRepository(session, client_id)
 
-    async def list_vendors(self, pagination: PaginationParams, status: Optional[str] = None):
+    async def list_vendors(self, pagination: PaginationParams, status: str | None = None):
         filters = {"status": status} if status else None
         items, total = await self._repo.list(
             offset=pagination.offset,

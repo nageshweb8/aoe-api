@@ -1,6 +1,5 @@
 """Alembic async env — runs autogenerate against all app/domain/* models."""
 
-from __future__ import annotations
 
 import asyncio
 from logging.config import fileConfig

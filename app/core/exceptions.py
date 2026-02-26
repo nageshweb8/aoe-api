@@ -1,12 +1,8 @@
 """Application-level exceptions and FastAPI exception handlers."""
 
-from __future__ import annotations
-
-from typing import Optional
 
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
-
 
 class AppException(Exception):
     """Base application exception."""
@@ -17,32 +13,26 @@ class AppException(Exception):
         self.code = code
         super().__init__(message)
 
-
 class NotFoundError(AppException):
-    def __init__(self, entity: str, entity_id: Optional[str] = None):
+    def __init__(self, entity: str, entity_id: str | None = None):
         msg = f"{entity} not found" if not entity_id else f"{entity} '{entity_id}' not found"
         super().__init__(msg, status_code=404, code="NOT_FOUND")
-
 
 class ForbiddenError(AppException):
     def __init__(self, message: str = "Access denied"):
         super().__init__(message, status_code=403, code="FORBIDDEN")
 
-
 class UnauthorizedError(AppException):
     def __init__(self, message: str = "Authentication required"):
         super().__init__(message, status_code=401, code="UNAUTHORIZED")
-
 
 class ConflictError(AppException):
     def __init__(self, message: str):
         super().__init__(message, status_code=409, code="CONFLICT")
 
-
 class ValidationError(AppException):
     def __init__(self, message: str):
         super().__init__(message, status_code=422, code="VALIDATION_ERROR")
-
 
 class COIExtractionError(AppException):
     """Raised when the AI extraction call fails (upstream service error)."""
@@ -50,14 +40,12 @@ class COIExtractionError(AppException):
     def __init__(self, message: str):
         super().__init__(message, status_code=502, code="AI_EXTRACTION_ERROR")
 
-
 # ---------------------------------------------------------------------------
 # FastAPI exception handlers
 # ---------------------------------------------------------------------------
 
 def _error_body(code: str, message: str) -> dict:
     return {"error": {"code": code, "message": message}}
-
 
 def register_exception_handlers(app: FastAPI) -> None:
     """Attach all custom exception handlers to the FastAPI app."""

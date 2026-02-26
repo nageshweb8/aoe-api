@@ -14,13 +14,11 @@ Column positions are detected dynamically from the header row so the parser
 is resilient to different ACORD 25 generators / column counts.
 """
 
-from __future__ import annotations
 
 import io
 import logging
 import re
 from datetime import datetime
-from typing import Optional
 
 import pdfplumber
 
@@ -28,19 +26,17 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["parse_acord25_pdf", "extract_raw_text"]
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _clean(val: Optional[str]) -> str:
+def _clean(val: str | None) -> str:
     """Strip and collapse whitespace; return empty string for None."""
     if not val:
         return ""
     return re.sub(r"\s+", " ", val).strip()
 
-
-def _parse_date(raw: str) -> Optional[str]:
+def _parse_date(raw: str) -> str | None:
     """Normalize a date string to ISO 8601 (YYYY-MM-DD).
 
     Accepts ``MM/DD/YYYY``, ``M/D/YYYY``, ``YYYY-MM-DD``, and ``MM-DD-YYYY``.
@@ -62,15 +58,13 @@ def _parse_date(raw: str) -> Optional[str]:
             pass
     return None
 
-
 _DATE_RE = re.compile(r"\d{1,2}/\d{1,2}/\d{4}")
-
 
 # ---------------------------------------------------------------------------
 # Table 0 — Header: Producer, Insured, Insurers
 # ---------------------------------------------------------------------------
 
-def _parse_header_table(table: list[list[Optional[str]]]) -> dict:
+def _parse_header_table(table: list[list[str | None]]) -> dict:
     """Parse the header table for producer, insured, and insurers.
 
     Handles two layouts:
@@ -87,8 +81,8 @@ def _parse_header_table(table: list[list[Optional[str]]]) -> dict:
 
     # ---- Flatten all cells once for searches & per-row scanning ----
     # Track row indices where PRODUCER / INSURED labels appear
-    producer_row_idx: Optional[int] = None
-    insured_row_idx: Optional[int] = None
+    producer_row_idx: int | None = None
+    insured_row_idx: int | None = None
 
     for ri, row in enumerate(table):
         for ci, cell in enumerate(row):
@@ -242,12 +236,11 @@ def _parse_header_table(table: list[list[Optional[str]]]) -> dict:
 
     return result
 
-
 # ---------------------------------------------------------------------------
 # Table 2 — Footer: Certificate Holder
 # ---------------------------------------------------------------------------
 
-def _parse_footer_table(table: list[list[Optional[str]]]) -> Optional[dict]:
+def _parse_footer_table(table: list[list[str | None]]) -> dict | None:
     """Parse the footer table for certificate holder."""
     for row in table:
         for cell in row:
@@ -275,7 +268,6 @@ def _parse_footer_table(table: list[list[Optional[str]]]) -> Optional[dict]:
             }
     return None
 
-
 # ---------------------------------------------------------------------------
 # Table 1 — Policy grid
 # ---------------------------------------------------------------------------
@@ -299,11 +291,9 @@ _INSURANCE_KEYWORDS = {
     "CRIME",
 }
 
-
 def _is_insurance_type(text: str) -> bool:
     upper = text.upper()
     return any(kw in upper for kw in _INSURANCE_KEYWORDS)
-
 
 def _normalize_type(raw: str) -> str:
     """Clean insurance type to a display-friendly name."""
@@ -324,8 +314,7 @@ def _normalize_type(raw: str) -> str:
         name = "Workers Compensation"
     return name.strip()
 
-
-def _find_column_indices(header_row: list[Optional[str]]) -> Optional[dict[str, int]]:
+def _find_column_indices(header_row: list[str | None]) -> dict[str, int] | None:
     """Dynamically find column indices from the header row labels."""
     cols: dict[str, int] = {}
     for i, cell in enumerate(header_row):
@@ -351,9 +340,8 @@ def _find_column_indices(header_row: list[Optional[str]]) -> Optional[dict[str, 
     cols.setdefault("ltr", 0)
     return cols
 
-
 def _collect_limits_range(
-    row: list[Optional[str]], limits_start: int
+    row: list[str | None], limits_start: int
 ) -> dict[str, str]:
     """Collect limit name→value pairs from the limits region of a row.
 
@@ -387,7 +375,6 @@ def _collect_limits_range(
 
     return limits
 
-
 # Limits-based insurance type inference (when type text is missing/partial)
 _LIMITS_TYPE_MAP = [
     ({"GENERAL AGGREGATE", "PRODUCTS", "PERSONAL"}, "Commercial General Liability"),
@@ -395,7 +382,6 @@ _LIMITS_TYPE_MAP = [
     ({"PER STATUTE", "E.L. EACH ACCIDENT", "E.L.EACHACCIDENT", "STATUTE"}, "Workers Compensation"),
     ({"AGGREGATE"}, "Umbrella/Excess Liability"),
 ]
-
 
 def _infer_type_from_limits(all_limit_names: set[str]) -> str:
     """Infer the insurance type from accumulated limit names."""
@@ -405,8 +391,7 @@ def _infer_type_from_limits(all_limit_names: set[str]) -> str:
             return type_name
     return "Other"
 
-
-def _parse_policy_table(table: list[list[Optional[str]]]) -> list[dict]:
+def _parse_policy_table(table: list[list[str | None]]) -> list[dict]:
     """
     Parse the ACORD 25 policy table with dynamic column detection and
     stateful row scanning.
@@ -426,7 +411,7 @@ def _parse_policy_table(table: list[list[Optional[str]]]) -> list[dict]:
 
     # ---- Find header row & column indices ----
     header_idx = None
-    cols: Optional[dict[str, int]] = None
+    cols: dict[str, int] | None = None
     for i, row in enumerate(table):
         cols = _find_column_indices(row)
         if cols is not None:
@@ -475,7 +460,7 @@ def _parse_policy_table(table: list[list[Optional[str]]]) -> list[dict]:
     type_queue: list[str] = []
     current_letter = ""
     last_consumed_type = ""   # Fallback when queue is empty (same section)
-    last_policy_idx: Optional[int] = None
+    last_policy_idx: int | None = None
     # Accumulate limit names for type inference when type text is missing
     pending_limit_names: set[str] = set()
 
@@ -624,19 +609,17 @@ def _parse_policy_table(table: list[list[Optional[str]]]) -> list[dict]:
 
     return policies
 
-
 # ---------------------------------------------------------------------------
 # Main parse function
 # ---------------------------------------------------------------------------
 
-def _has_policy_header(table: list[list[Optional[str]]]) -> bool:
+def _has_policy_header(table: list[list[str | None]]) -> bool:
     """Check if a table contains a POLICY NUMBER header row."""
     for row in table:
         for cell in row:
             if cell and "POLICY NUMBER" in cell.upper():
                 return True
     return False
-
 
 def parse_acord25_pdf(pdf_bytes: bytes) -> dict:
     """
@@ -678,7 +661,7 @@ def parse_acord25_pdf(pdf_bytes: bytes) -> dict:
 
         header_data: dict = {}
         policies: list[dict] = []
-        certificate_holder: Optional[dict] = None
+        certificate_holder: dict | None = None
 
         if len(tables) >= 3 and not _has_policy_header(tables[0]):
             # ---- 3-table layout (header, policies, footer) ----
@@ -738,7 +721,6 @@ def parse_acord25_pdf(pdf_bytes: bytes) -> dict:
         "certificateDate": certificate_date,
         "policies": policies,
     }
-
 
 # ---------------------------------------------------------------------------
 # Raw text extraction (for AI layer)

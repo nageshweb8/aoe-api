@@ -1,10 +1,6 @@
-from __future__ import annotations
-
-from typing import Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings
-
 
 class Settings(BaseSettings):
     """Application configuration loaded from environment variables / .env file."""
@@ -16,7 +12,7 @@ class Settings(BaseSettings):
     max_upload_size_mb: int = 10
 
     # OpenAI
-    openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
+    openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
     openai_model: str = Field(default="gpt-4.1-mini", alias="OPENAI_MODEL")
     openai_max_tokens: int = Field(default=2000, alias="OPENAI_MAX_TOKENS")
     openai_timeout: int = Field(default=60, alias="OPENAI_TIMEOUT")
@@ -44,6 +40,5 @@ class Settings(BaseSettings):
     def ai_enabled(self) -> bool:
         """AI features are available only when an OpenAI key is configured."""
         return bool(self.openai_api_key)
-
 
 settings = Settings()

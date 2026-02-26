@@ -1,6 +1,5 @@
 """Pagination helpers for list endpoints."""
 
-from __future__ import annotations
 
 from fastapi import Query
 from pydantic import BaseModel
