@@ -26,7 +26,7 @@ import pdfplumber
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["parse_acord25_pdf"]
+__all__ = ["parse_acord25_pdf", "extract_raw_text"]
 
 
 # ---------------------------------------------------------------------------
@@ -738,3 +738,24 @@ def parse_acord25_pdf(pdf_bytes: bytes) -> dict:
         "certificateDate": certificate_date,
         "policies": policies,
     }
+
+
+# ---------------------------------------------------------------------------
+# Raw text extraction (for AI layer)
+# ---------------------------------------------------------------------------
+
+def extract_raw_text(pdf_bytes: bytes) -> str:
+    """Extract the full raw text from a PDF for AI processing.
+
+    This is intentionally separate from the structured parse — a simple text
+    dump that preserves as much content as possible for the LLM to reason
+    over.
+    """
+    pdf_file = io.BytesIO(pdf_bytes)
+    pages: list[str] = []
+    with pdfplumber.open(pdf_file) as pdf:
+        for page in pdf.pages:
+            text = page.extract_text()
+            if text:
+                pages.append(text)
+    return "\n".join(pages)
