@@ -1,6 +1,5 @@
 """Standardized JSON response envelope helpers."""
 
-from __future__ import annotations
 
 import math
 from typing import Generic, TypeVar

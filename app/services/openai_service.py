@@ -10,11 +10,10 @@ Can be used as a standalone extractor (raw text in → structured JSON out) or
 as a validation+correction layer on top of pdfplumber.
 """
 
-from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
 from openai import AsyncOpenAI, OpenAIError
 
@@ -132,7 +131,6 @@ Output ONLY valid JSON matching this schema:
 5. The "corrections" array must list every change made vs the machine extraction (empty array if none).
 6. The "is_coi" field MUST always be present."""
 
-
 class COIAIService:
     """Thin async wrapper around OpenAI for COI document validation and data extraction."""
 
@@ -152,7 +150,7 @@ class COIAIService:
 
     async def _call_openai(
         self, system_prompt: str, user_message: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Send an async request to OpenAI and return parsed JSON."""
         try:
             logger.info(
@@ -189,8 +187,8 @@ class COIAIService:
     async def validate_and_extract(
         self,
         raw_text: str,
-        machine_extraction: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        machine_extraction: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Validate the document and extract COI data in a single call.
 
         The AI first checks if the text is from a COI document. If not, it
@@ -212,7 +210,6 @@ class COIAIService:
             )
         user_message = "\n".join(parts)
         return await self._call_openai(COI_EXTRACTION_PROMPT, user_message)
-
 
 def get_ai_service() -> COIAIService:
     """Factory that creates a COIAIService instance.

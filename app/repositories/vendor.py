@@ -7,7 +7,6 @@ How to add a new repository:
   3. Add any domain-specific query methods as needed
 """
 
-from __future__ import annotations
 
 from app.domain.vendor import Vendor
 from app.repositories.base import BaseRepository

@@ -7,4 +7,7 @@ venv/
 dist/
 *.egg-info/
 .ruff_cache/
+*.db
+.DS_Store
+_migrate_typing.py
 sample/*

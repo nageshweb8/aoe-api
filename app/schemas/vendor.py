@@ -1,68 +1,61 @@
 """Vendor Pydantic schemas (request DTOs and response models)."""
 
-from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
 
 from app.schemas.common import CamelModel
 
-
 class VendorCreate(CamelModel):
     company_name: str
-    address_street: Optional[str] = None
-    address_city: Optional[str] = None
-    address_state: Optional[str] = None
-    address_zip: Optional[str] = None
-    contact_name: Optional[str] = None
-    contact_title: Optional[str] = None
-    contact_email: Optional[str] = None
-    contact_phone: Optional[str] = None
-    agent_name: Optional[str] = None
-    agent_company: Optional[str] = None
-    agent_email: Optional[str] = None
-    agent_phone: Optional[str] = None
-    notes: Optional[str] = None
-
+    address_street: str | None = None
+    address_city: str | None = None
+    address_state: str | None = None
+    address_zip: str | None = None
+    contact_name: str | None = None
+    contact_title: str | None = None
+    contact_email: str | None = None
+    contact_phone: str | None = None
+    agent_name: str | None = None
+    agent_company: str | None = None
+    agent_email: str | None = None
+    agent_phone: str | None = None
+    notes: str | None = None
 
 class VendorUpdate(CamelModel):
-    company_name: Optional[str] = None
-    address_street: Optional[str] = None
-    address_city: Optional[str] = None
-    address_state: Optional[str] = None
-    address_zip: Optional[str] = None
-    contact_name: Optional[str] = None
-    contact_title: Optional[str] = None
-    contact_email: Optional[str] = None
-    contact_phone: Optional[str] = None
-    agent_name: Optional[str] = None
-    agent_company: Optional[str] = None
-    agent_email: Optional[str] = None
-    agent_phone: Optional[str] = None
-    status: Optional[str] = None
-    notes: Optional[str] = None
-
+    company_name: str | None = None
+    address_street: str | None = None
+    address_city: str | None = None
+    address_state: str | None = None
+    address_zip: str | None = None
+    contact_name: str | None = None
+    contact_title: str | None = None
+    contact_email: str | None = None
+    contact_phone: str | None = None
+    agent_name: str | None = None
+    agent_company: str | None = None
+    agent_email: str | None = None
+    agent_phone: str | None = None
+    status: str | None = None
+    notes: str | None = None
 
 class VendorOut(CamelModel):
     id: str
     client_id: str
     company_name: str
-    address_street: Optional[str] = None
-    address_city: Optional[str] = None
-    address_state: Optional[str] = None
-    address_zip: Optional[str] = None
-    contact_name: Optional[str] = None
-    contact_title: Optional[str] = None
-    contact_email: Optional[str] = None
-    contact_phone: Optional[str] = None
-    agent_name: Optional[str] = None
-    agent_company: Optional[str] = None
-    agent_email: Optional[str] = None
-    agent_phone: Optional[str] = None
+    address_street: str | None = None
+    address_city: str | None = None
+    address_state: str | None = None
+    address_zip: str | None = None
+    contact_name: str | None = None
+    contact_title: str | None = None
+    contact_email: str | None = None
+    contact_phone: str | None = None
+    agent_name: str | None = None
+    agent_company: str | None = None
+    agent_email: str | None = None
+    agent_phone: str | None = None
     status: str
-    notes: Optional[str] = None
+    notes: str | None = None
     created_at: datetime
     updated_at: datetime
-
-
 

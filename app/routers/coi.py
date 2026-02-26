@@ -5,7 +5,6 @@ responsible only for HTTP concerns: request validation, file handling,
 and mapping domain exceptions to HTTP status codes.
 """
 
-from __future__ import annotations
 
 import logging
 

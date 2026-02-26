@@ -9,9 +9,6 @@ Pattern:
 Copy this file when building Building, Agent, etc. routers.
 """
 
-from __future__ import annotations
-
-from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,7 +22,6 @@ from app.services.vendor import VendorService
 
 router = APIRouter(prefix="/vendors", tags=["Vendors"])
 
-
 # ------------------------------------------------------------------
 # Helper — instantiate service with session + default client
 # ------------------------------------------------------------------
@@ -33,14 +29,13 @@ router = APIRouter(prefix="/vendors", tags=["Vendors"])
 def _svc(session: AsyncSession) -> VendorService:
     return VendorService(session, settings.default_client_id)
 
-
 # ------------------------------------------------------------------
 # Endpoints
 # ------------------------------------------------------------------
 
 @router.get("", response_model=ListResponse[VendorOut])
 async def list_vendors(
-    filter_status: Optional[str] = Query(default=None, alias="status", description="Filter by status"),
+    filter_status: str | None = Query(default=None, alias="status", description="Filter by status"),
     pagination: PaginationParams = Depends(),
     session: AsyncSession = Depends(get_db),
 ):
@@ -51,7 +46,6 @@ async def list_vendors(
         total, pagination.page, pagination.limit,
     )
 
-
 @router.post("", response_model=DataResponse[VendorOut], status_code=status.HTTP_201_CREATED)
 async def create_vendor(
     body: VendorCreate,
@@ -61,7 +55,6 @@ async def create_vendor(
     vendor = await _svc(session).create_vendor(body)
     return {"data": VendorOut.model_validate(vendor)}
 
-
 @router.get("/{vendor_id}", response_model=DataResponse[VendorOut])
 async def get_vendor(
     vendor_id: str,
@@ -69,7 +62,6 @@ async def get_vendor(
 ):
     vendor = await _svc(session).get_vendor(vendor_id)
     return {"data": VendorOut.model_validate(vendor)}
-
 
 @router.put("/{vendor_id}", response_model=DataResponse[VendorOut])
 async def update_vendor(
@@ -79,7 +71,6 @@ async def update_vendor(
 ):
     vendor = await _svc(session).update_vendor(vendor_id, body)
     return {"data": VendorOut.model_validate(vendor)}
-
 
 @router.delete("/{vendor_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_vendor(

@@ -1,8 +1,7 @@
 """Async SQLAlchemy engine, session factory, declarative Base, and FastAPI dependency."""
 
-from __future__ import annotations
 
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -12,7 +11,6 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.orm import DeclarativeBase
 
 from app.core.config import settings
-
 
 # ---------------------------------------------------------------------------
 # Engine
@@ -39,13 +37,11 @@ async_session_factory = async_sessionmaker(
     autocommit=False,
 )
 
-
 # ---------------------------------------------------------------------------
 # Declarative Base
 # ---------------------------------------------------------------------------
 class Base(DeclarativeBase):
     """All ORM models inherit from this base."""
-
 
 # ---------------------------------------------------------------------------
 # FastAPI dependency
