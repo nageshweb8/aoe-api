@@ -23,31 +23,59 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/coi", tags=["COI"])
 
-_ALLOWED_CONTENT_TYPE = "application/pdf"
-_ALLOWED_EXTENSION = ".pdf"
+_ALLOWED_CONTENT_TYPES: dict[str, str] = {
+    "application/pdf": "pdf",
+    "image/jpeg": "image",
+    "image/png": "image",
+}
+_ALLOWED_EXTENSIONS: dict[str, str] = {
+    ".pdf": "pdf",
+    ".jpg": "image",
+    ".jpeg": "image",
+    ".png": "image",
+}
 
 
 # ---------------------------------------------------------------------------
 # Shared file validation (HTTP concern — stays in the router)
 # ---------------------------------------------------------------------------
 
-async def _validate_and_read_pdf(file: UploadFile) -> bytes:
-    """Validate the uploaded file and return its bytes.
+def _detect_file_kind(file: UploadFile) -> str:
+    """Return ``'pdf'`` or ``'image'`` based on content type and extension.
 
-    Raises HTTPException on invalid input.
+    Raises :class:`HTTPException` when the file type is not supported.
     """
-    if file.content_type != _ALLOWED_CONTENT_TYPE:
+    kind_by_ct = _ALLOWED_CONTENT_TYPES.get(file.content_type or "")
+
+    filename = (file.filename or "").lower()
+    ext = ""
+    for e in _ALLOWED_EXTENSIONS:
+        if filename.endswith(e):
+            ext = e
+            break
+    kind_by_ext = _ALLOWED_EXTENSIONS.get(ext)
+
+    # Accept if either content-type or extension matches
+    kind = kind_by_ct or kind_by_ext
+    if not kind:
+        accepted = ", ".join(sorted({*_ALLOWED_EXTENSIONS}))
         raise HTTPException(
             status_code=415,
-            detail=f"Unsupported file type '{file.content_type}'. Only PDF files are accepted.",
+            detail=(
+                f"Unsupported file type '{file.content_type}'. "
+                f"Accepted formats: {accepted}"
+            ),
         )
+    return kind
 
-    filename = file.filename or ""
-    if not filename.lower().endswith(_ALLOWED_EXTENSION):
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid file extension. Only .pdf files are accepted.",
-        )
+
+async def _validate_and_read_file(file: UploadFile) -> tuple[bytes, str]:
+    """Validate the uploaded file and return ``(contents, kind)``.
+
+    *kind* is ``'pdf'`` or ``'image'``.
+    Raises HTTPException on invalid input.
+    """
+    kind = _detect_file_kind(file)
 
     contents = await file.read()
 
@@ -60,11 +88,11 @@ async def _validate_and_read_pdf(file: UploadFile) -> bytes:
             detail=f"File size exceeds the {settings.max_upload_size_mb}MB limit.",
         )
 
-    return contents
+    return contents, kind
 
 
 # ---------------------------------------------------------------------------
-# POST /api/coi/verify — PDF upload (optionally AI-enhanced)
+# POST /api/coi/verify — PDF or image upload (optionally AI-enhanced)
 # ---------------------------------------------------------------------------
 
 @router.post("/verify", response_model=COIVerificationResponse)
@@ -73,14 +101,30 @@ async def verify_coi(
     use_ai: bool = Query(
         default=False,
         description=(
-            "When true, always run AI enhancement after pdfplumber extraction. "
-            "When false (default), AI is invoked only if the extraction is incomplete."
+            "When true, always run AI enhancement after extraction. "
+            "When false (default), AI is invoked only if the extraction is incomplete. "
+            "Image uploads (JPEG/PNG) always use AI regardless of this flag."
         ),
     ),
 ):
-    """Upload an ACORD 25 PDF, extract structured data, optionally
-    enhance with OpenAI, validate expiration dates, and return JSON."""
-    contents = await _validate_and_read_pdf(file)
+    """Upload an ACORD 25 document (PDF, JPEG, or PNG), extract structured
+    data, optionally enhance with OpenAI, validate expiration dates, and
+    return JSON."""
+    contents, kind = await _validate_and_read_file(file)
+
+    if kind == "image":
+        # Images always go through Vision AI
+        if not settings.ai_enabled:
+            raise HTTPException(
+                status_code=503,
+                detail="AI features are not available. Configure OPENAI_API_KEY to enable image processing.",
+            )
+        mime = file.content_type or "image/png"
+        try:
+            return await coi_service.ai_extract_from_image(contents, mime_type=mime)
+        except COIExtractionError as exc:
+            raise HTTPException(status_code=502, detail=f"AI extraction failed: {exc}") from exc
+
     return await coi_service.verify_coi(contents, use_ai=use_ai)
 
 
@@ -119,19 +163,24 @@ async def ai_extract_coi(body: AIExtractionRequest):
     response_model=AIExtractionResponse,
     summary="AI COI Enhancement",
     description=(
-        "Upload a PDF and force AI enhancement — always runs both pdfplumber "
-        "and OpenAI, returning the merged result with confidence scores."
+        "Upload a PDF or image and force AI enhancement — always runs AI, "
+        "returning the result with confidence scores. For PDFs, pdfplumber "
+        "extraction is used as a baseline before AI. For images, Vision API "
+        "extracts directly."
     ),
 )
 async def ai_enhance_coi(file: UploadFile = File(...)):
-    """Upload a PDF and force AI enhancement with confidence scores."""
+    """Upload a document and force AI enhancement with confidence scores."""
     if not settings.ai_enabled:
         raise HTTPException(
             status_code=503,
             detail="AI features are not available. Configure OPENAI_API_KEY to enable.",
         )
-    contents = await _validate_and_read_pdf(file)
+    contents, kind = await _validate_and_read_file(file)
     try:
+        if kind == "image":
+            mime = file.content_type or "image/png"
+            return await coi_service.ai_extract_from_image(contents, mime_type=mime)
         return await coi_service.ai_enhance_from_pdf(contents)
     except COIExtractionError as exc:
         raise HTTPException(status_code=502, detail=f"AI extraction failed: {exc}") from exc

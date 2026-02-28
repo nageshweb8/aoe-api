@@ -1,16 +1,19 @@
 """COI AI extraction service — OpenAI-powered validation and enhancement layer.
 
-Provides two capabilities:
+Provides three capabilities:
 1. **Document validation** — Detects whether text is from a valid ACORD 25 / COI
    document and rejects non-insurance documents with a clear reason.
 2. **Structured extraction** — Extracts/enhances COI data with per-field
-   confidence scores.
+   confidence scores from text.
+3. **Vision extraction** — Extracts COI data directly from document images
+   (scanned PDFs, JPEG, PNG) using the OpenAI Vision API.
 
-Can be used as a standalone extractor (raw text in → structured JSON out) or
-as a validation+correction layer on top of pdfplumber.
+Can be used as a standalone extractor (raw text or images in → structured JSON
+out) or as a validation+correction layer on top of pdfplumber.
 """
 
 
+import base64
 import json
 import logging
 from typing import Any
@@ -149,37 +152,54 @@ class COIAIService:
     # ── Core OpenAI call ──────────────────────────────────────────────────
 
     async def _call_openai(
-        self, system_prompt: str, user_message: str
+        self,
+        system_prompt: str,
+        user_content: str | list[dict[str, Any]],
+        *,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
-        """Send an async request to OpenAI and return parsed JSON."""
+        """Send a chat completion request and return parsed JSON.
+
+        Works for both text and Vision (multimodal) inputs.  When *timeout*
+        is provided it overrides the client-level default (useful for Vision
+        calls which are inherently slower).
+        """
+        is_vision = isinstance(user_content, list)
+        label = "Vision" if is_vision else "text"
+
+        if is_vision:
+            n_images = sum(1 for b in user_content if b.get("type") == "image_url")
+            logger.info("Calling OpenAI %s  model=%s, images=%d", label, self.model, n_images)
+        else:
+            logger.info("Calling OpenAI %s  model=%s, input_length=%d", label, self.model, len(user_content))
+
         try:
-            logger.info(
-                "Calling OpenAI model=%s, input_length=%d",
-                self.model,
-                len(user_message),
-            )
-            response = await self.client.chat.completions.create(
+            create_kwargs: dict[str, Any] = dict(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_message},
+                    {"role": "user", "content": user_content},
                 ],
                 max_completion_tokens=self.max_tokens,
                 response_format={"type": "json_object"},
             )
+            if timeout is not None:
+                create_kwargs["timeout"] = timeout
+
+            response = await self.client.chat.completions.create(**create_kwargs)
 
             content = response.choices[0].message.content
             if not content:
-                raise COIExtractionError("Empty response from OpenAI")
+                raise COIExtractionError(f"Empty response from OpenAI ({label})")
 
-            logger.info("OpenAI call successful")
+            logger.info("OpenAI %s call successful", label)
             return json.loads(content)
 
         except OpenAIError as exc:
-            logger.error("OpenAI API error: %s", exc)
+            logger.error("OpenAI %s API error: %s", label, exc)
             raise COIExtractionError(f"OpenAI service error: {exc}") from exc
         except json.JSONDecodeError as exc:
-            logger.error("Invalid JSON from OpenAI: %s", exc)
+            logger.error("Invalid JSON from OpenAI %s: %s", label, exc)
             raise COIExtractionError(f"Invalid JSON response: {exc}") from exc
 
     # ── Public methods ────────────────────────────────────────────────────
@@ -210,6 +230,65 @@ class COIAIService:
             )
         user_message = "\n".join(parts)
         return await self._call_openai(COI_EXTRACTION_PROMPT, user_message)
+
+    async def validate_and_extract_from_images(
+        self,
+        images: list[bytes],
+        *,
+        mime_type: str = "image/png",
+        raw_text: str | None = None,
+        machine_extraction: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Validate and extract COI data from document images using the Vision API.
+
+        Args:
+            images: List of raw image bytes (PNG or JPEG).
+            mime_type: MIME type of the images (``image/png`` or ``image/jpeg``).
+            raw_text: Optional pdfplumber text (may be empty for scanned docs).
+            machine_extraction: Optional prior pdfplumber extraction result.
+
+        Returns:
+            Dict with ``is_coi``, ``confidence``, ``field_confidence``,
+            ``data``, and ``corrections`` keys.
+        """
+        content_blocks: list[dict[str, Any]] = []
+
+        # Provide any available text context
+        if raw_text and raw_text.strip():
+            content_blocks.append({
+                "type": "text",
+                "text": f"Machine-extracted text (may be incomplete):\n{raw_text}",
+            })
+        if machine_extraction:
+            content_blocks.append({
+                "type": "text",
+                "text": (
+                    "Machine extraction (baseline):\n"
+                    f"{json.dumps(machine_extraction, indent=2, default=str)}"
+                ),
+            })
+
+        # Add document images
+        content_blocks.append({
+            "type": "text",
+            "text": "Extract COI data from the following document image(s):",
+        })
+
+        detail = settings.openai_vision_detail
+        for img_bytes in images:
+            b64 = base64.b64encode(img_bytes).decode()
+            content_blocks.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:{mime_type};base64,{b64}",
+                    "detail": detail,
+                },
+            })
+
+        return await self._call_openai(
+            COI_EXTRACTION_PROMPT, content_blocks,
+            timeout=settings.openai_vision_timeout,
+        )
 
 def get_ai_service() -> COIAIService:
     """Factory that creates a COIAIService instance.

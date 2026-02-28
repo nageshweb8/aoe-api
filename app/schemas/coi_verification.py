@@ -59,6 +59,10 @@ class COIVerificationResponse(BaseModel):
     )
     status: str  # verified | expired | partial | invalid_document | error
     message: str | None = None
+    source_type: str = Field(
+        default="pdf", alias="sourceType",
+        description="Origin of the extraction: pdf, image, or text.",
+    )
 
     model_config = {"populate_by_name": True}
 
@@ -98,8 +102,23 @@ class AIExtractionResponse(BaseModel):
         default=None, alias="expirationWarnings"
     )
     corrections: list[str] = Field(default_factory=list)
+    requires_review: bool = Field(
+        default=False, alias="requiresReview",
+        description=(
+            "True when overall confidence is below the review threshold "
+            "or any individual field confidence is below the field threshold."
+        ),
+    )
+    review_reasons: list[str] = Field(
+        default_factory=list, alias="reviewReasons",
+        description="Human-readable reasons why this extraction was flagged for review.",
+    )
     status: str
     message: str | None = None
+    source_type: str = Field(
+        default="pdf", alias="sourceType",
+        description="Origin of the extraction: pdf, image, or text.",
+    )
 
     model_config = {"populate_by_name": True}
 

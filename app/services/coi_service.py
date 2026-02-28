@@ -169,11 +169,55 @@ def _safe_policies(data: Any) -> list[COIPolicy]:
 # Response builders
 # ---------------------------------------------------------------------------
 
+def _check_requires_review(
+    confidence: float, field_confidence: FieldConfidence,
+) -> tuple[bool, list[str]]:
+    """Determine whether an AI extraction should be flagged for human review.
+
+    Returns ``(requires_review, reasons)`` where *reasons* is a list of
+    human-readable explanations (empty when review is not required).
+    """
+    reasons: list[str] = []
+    overall_threshold = settings.review_confidence_threshold
+    field_threshold = settings.review_field_confidence_threshold
+
+    if confidence < overall_threshold:
+        reasons.append(
+            f"Overall confidence ({confidence:.0%}) is below "
+            f"the review threshold ({overall_threshold:.0%})."
+        )
+
+    # Check each field score against the field threshold
+    field_scores: dict[str, float] = {
+        "producer": field_confidence.producer,
+        "insured": field_confidence.insured,
+        "certificate_holder": field_confidence.certificate_holder,
+        "insurers": field_confidence.insurers,
+        "policies": field_confidence.policies,
+        "certificate_date": field_confidence.certificate_date,
+    }
+    low_fields = [
+        name for name, score in field_scores.items()
+        if score < field_threshold
+    ]
+    if low_fields:
+        labels = ", ".join(f.replace("_", " ") for f in low_fields)
+        reasons.append(
+            f"Low confidence on: {labels} "
+            f"(below {field_threshold:.0%} threshold)."
+        )
+
+    return bool(reasons), reasons
+
+
+_DEFAULT_NOT_COI_MSG = (
+    "The uploaded document does not appear to be a valid ACORD 25 "
+    "Certificate of Insurance. Please upload a valid COI document."
+)
+
+
 def invalid_document_response(
-    message: str = (
-        "The uploaded document does not appear to be a valid ACORD 25 "
-        "Certificate of Insurance. Please upload a valid COI document."
-    ),
+    message: str = _DEFAULT_NOT_COI_MSG,
 ) -> COIVerificationResponse:
     """Return a clear invalid-document response instead of a 500 error."""
     return COIVerificationResponse(
@@ -185,10 +229,7 @@ def invalid_document_response(
     )
 
 def invalid_document_ai_response(
-    message: str = (
-        "The uploaded document does not appear to be a valid ACORD 25 "
-        "Certificate of Insurance. Please upload a valid COI document."
-    ),
+    message: str = _DEFAULT_NOT_COI_MSG,
 ) -> AIExtractionResponse:
     """Return a clear invalid-document AI response."""
     return AIExtractionResponse(
@@ -207,6 +248,7 @@ def build_verification_response(
     confidence: float | None = None,
     field_confidence: dict[str, Any] | None = None,
     corrections: list[str] | None = None,
+    source_type: str = "pdf",
 ) -> COIVerificationResponse | AIExtractionResponse:
     """Build the appropriate response model from a parsed dict.
 
@@ -245,14 +287,19 @@ def build_verification_response(
         expiration_warnings=expiration_warnings if expiration_warnings else None,
         status=status,
         message=message,
+        source_type=source_type,
     )
 
     if confidence is not None:
+        fc = FieldConfidence(**(field_confidence or {}))
+        requires_review, review_reasons = _check_requires_review(confidence, fc)
         return AIExtractionResponse(
             **common,
             confidence=confidence,
-            field_confidence=FieldConfidence(**(field_confidence or {})),
+            field_confidence=fc,
             corrections=corrections or [],
+            requires_review=requires_review,
+            review_reasons=review_reasons,
         )
     return COIVerificationResponse(**common)
 
@@ -286,25 +333,103 @@ def _parse_pdf(contents: bytes) -> dict[str, Any]:
         logger.warning("pdfplumber parse failed: %s", exc)
         return _empty_parsed()
 
+
+def _convert_pdf_to_images(contents: bytes) -> list[bytes]:
+    """Render PDF pages as PNG images using PyMuPDF.
+
+    Returns a list of raw PNG bytes (one per page), limited to
+    ``settings.max_pdf_pages_for_vision`` pages.
+
+    Raises :class:`COIExtractionError` for unreadable or password-protected PDFs.
+    """
+    import fitz  # PyMuPDF — lazy import to keep startup fast
+
+    try:
+        doc = fitz.open(stream=contents, filetype="pdf")
+    except Exception as exc:
+        raise COIExtractionError(f"Unable to open PDF: {exc}") from exc
+
+    if doc.is_encrypted:
+        doc.close()
+        raise COIExtractionError(
+            "Password-protected PDFs are not supported. "
+            "Please upload an unprotected document."
+        )
+
+    max_pages = settings.max_pdf_pages_for_vision
+    dpi = settings.vision_dpi
+    zoom = dpi / 72  # PyMuPDF default is 72 DPI
+
+    images: list[bytes] = []
+    try:
+        for page_num in range(min(len(doc), max_pages)):
+            page = doc[page_num]
+            mat = fitz.Matrix(zoom, zoom)
+            pix = page.get_pixmap(matrix=mat, alpha=False)
+            images.append(pix.tobytes("png"))
+            logger.debug(
+                "Rendered PDF page %d → %dx%d PNG (%d bytes)",
+                page_num + 1, pix.width, pix.height, len(images[-1]),
+            )
+    finally:
+        doc.close()
+
+    if not images:
+        raise COIExtractionError("PDF contains no renderable pages.")
+
+    logger.info(
+        "Converted %d PDF page(s) to images (dpi=%d)", len(images), dpi,
+    )
+    return images
+
 # ---------------------------------------------------------------------------
 # Core orchestration — public API
 # ---------------------------------------------------------------------------
-
-_DEFAULT_NOT_COI_MSG = (
-    "The uploaded document does not appear to be a valid ACORD 25 "
-    "Certificate of Insurance. Please upload a valid COI document."
-)
 
 async def verify_coi(
     contents: bytes, *, use_ai: bool = False,
 ) -> COIVerificationResponse:
     """Parse an ACORD 25 PDF, optionally enhance with AI, and return verification.
 
+    For scanned/image-based PDFs where pdfplumber returns no text, the PDF
+    pages are converted to images and sent to the Vision API.
+
     Non-COI documents receive a clear *invalid_document* response (never a 500).
     AI failures are non-fatal — they are logged and skipped.
     """
     raw_text = _extract_text(contents)
     parsed = _parse_pdf(contents)
+
+    # --- Scanned PDF fallback: Vision API ---
+    # When pdfplumber extracts no text, the document is likely a scanned image.
+    # Convert PDF pages to images and use Vision API for extraction.
+    if not raw_text.strip() and settings.ai_enabled:
+        try:
+            page_images = _convert_pdf_to_images(contents)
+
+            from app.services.openai_service import get_ai_service
+
+            ai_service = get_ai_service()
+            ai_result = await ai_service.validate_and_extract_from_images(
+                page_images,
+                mime_type="image/png",
+                machine_extraction=parsed if parsed.get("policies") else None,
+            )
+
+            if not ai_result.get("is_coi", False):
+                return invalid_document_response(
+                    ai_result.get("rejection_reason", _DEFAULT_NOT_COI_MSG)
+                )
+
+            return build_verification_response(
+                ai_result.get("data", {}),
+                source_type="scanned_pdf",
+            )
+        except COIExtractionError as exc:
+            logger.warning("Vision fallback failed for scanned PDF: %s", exc)
+            # Fall through to standard classification below
+        except Exception as exc:
+            logger.warning("Vision fallback error (non-fatal): %s", exc)
 
     # --- Document classification ---
     has_coi_structure = bool(parsed.get("policies")) or bool(
@@ -397,10 +522,47 @@ async def ai_extract_from_text(raw_text: str) -> AIExtractionResponse:
         confidence=ai_result.get("confidence", 0.0),
         field_confidence=ai_result.get("field_confidence", {}),
         corrections=ai_result.get("corrections", []),
+        source_type="text",
     )
+
+async def ai_extract_from_image(
+    contents: bytes, *, mime_type: str = "image/png",
+) -> AIExtractionResponse:
+    """Extract COI data from a JPEG/PNG image using the OpenAI Vision API.
+
+    Raises :class:`COIExtractionError` if the AI call fails.
+    """
+    from app.services.openai_service import get_ai_service
+
+    ai_service = get_ai_service()
+    ai_result = await ai_service.validate_and_extract_from_images(
+        [contents], mime_type=mime_type,
+    )
+
+    if not ai_result.get("is_coi", False):
+        return invalid_document_ai_response(
+            ai_result.get(
+                "rejection_reason",
+                "The uploaded image does not appear to be a valid ACORD 25 "
+                "Certificate of Insurance. Please upload a valid COI document.",
+            )
+        )
+
+    ai_data = ai_result.get("data", {})
+    return build_verification_response(
+        ai_data,
+        confidence=ai_result.get("confidence", 0.0),
+        field_confidence=ai_result.get("field_confidence", {}),
+        corrections=ai_result.get("corrections", []),
+        source_type="image",
+    )
+
 
 async def ai_enhance_from_pdf(contents: bytes) -> AIExtractionResponse:
     """Parse PDF with pdfplumber, then always run AI enhancement.
+
+    For scanned PDFs (no extractable text), pages are converted to images
+    and sent to the Vision API instead of the text-only endpoint.
 
     Raises :class:`COIExtractionError` if the AI call fails.
     """
@@ -411,17 +573,32 @@ async def ai_enhance_from_pdf(contents: bytes) -> AIExtractionResponse:
 
     ai_service = get_ai_service()
 
-    # When raw_text is empty (scanned/image PDF), tell the AI the context
+    # --- Scanned PDF: use Vision API with page images ---
     if not raw_text.strip():
-        ai_text = (
-            "(No extractable text — this appears to be a scanned/image-based PDF. "
-            "The pdfplumber extraction below is all that could be recovered.)"
+        page_images = _convert_pdf_to_images(contents)
+        ai_result = await ai_service.validate_and_extract_from_images(
+            page_images,
+            mime_type="image/png",
+            machine_extraction=parsed if parsed.get("policies") else None,
         )
-    else:
-        ai_text = raw_text
 
+        if not ai_result.get("is_coi", False):
+            return invalid_document_ai_response(
+                ai_result.get("rejection_reason", _DEFAULT_NOT_COI_MSG)
+            )
+
+        ai_data = ai_result.get("data", {})
+        return build_verification_response(
+            ai_data,
+            confidence=ai_result.get("confidence", 0.0),
+            field_confidence=ai_result.get("field_confidence", {}),
+            corrections=ai_result.get("corrections", []),
+            source_type="scanned_pdf",
+        )
+
+    # --- Text-based PDF: use text AI with pdfplumber baseline ---
     ai_result = await ai_service.validate_and_extract(
-        ai_text, machine_extraction=parsed,
+        raw_text, machine_extraction=parsed,
     )
 
     # Not a COI document
